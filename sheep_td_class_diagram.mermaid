@@ -1,0 +1,262 @@
+classDiagram
+    direction TB
+
+    %% ===== 共通（シーン間） =====
+    class GameSession {
+        <<static / シーン間の受け渡し>>
+        +SelectedStage : StageData
+        +SelectedGems : List~GemData~
+        +Clear()
+    }
+
+    class SceneLoader {
+        <<static>>
+        +LoadTitle()
+        +LoadStageSelect()
+        +LoadStage()
+    }
+
+    %% ===== タイトル・ステージ選択 =====
+    class TitleController {
+        +OnClickStart()
+    }
+
+    class StageSelectController {
+        -stageList : StageData[]
+        -selectedGems : List~GemData~
+        +OnSelectStage(stage : StageData)
+        +OnToggleGem(gem : GemData)
+        +OnClickStart()
+    }
+
+    %% ===== ステージ設定データ =====
+    class StageData {
+        <<ScriptableObject>>
+        +stageName : string
+        +gridWidth : int
+        +gridHeight : int
+        +spawnCells : Vector2Int[]  敵の出現マス
+        +goalCells : Vector2Int[]  到達で負けるマス
+        +startMoney : int  初期お金
+        +waves : WaveData[]
+    }
+
+    class WaveData {
+        <<Serializable>>
+        +enemyData : EnemyData
+        +count : int
+        +spawnInterval : float
+        +isBossWave : bool
+    }
+
+    %% ===== ステージ進行 =====
+    class GameState {
+        <<enumeration>>
+        Preparing
+        WaveRunning
+        Victory
+        Defeat
+    }
+
+    class GameManager {
+        <<ステージ全体の司令塔>>
+        +State : GameState
+        +Money : int
+        +CurrentWave : int
+        +StartStage()
+        +AddMoney(v : int)
+        +TrySpendMoney(v : int) bool
+        +OnEnemyDefeated(enemy : Enemy)
+        +OnGoalReached()
+    }
+
+    class WaveSpawner {
+        +SpawnWave(wave : WaveData)
+        +event OnWaveCleared
+    }
+
+    class UIManager {
+        +ShowMoney(v : int)
+        +ShowWave(n : int)
+        +ShowGemConfirm(gem : GemData, tower : Tower)
+        +ShowResult(isWin : bool)
+    }
+
+    %% ===== マス目・経路・配置 =====
+    class CellType {
+        <<enumeration>>
+        Empty
+        Blocked
+        Spawn
+        Goal
+    }
+
+    class Cell {
+        +Type : CellType
+        +Tower : Tower
+        +IsWalkable : bool  タワーなし かつ Blocked以外
+    }
+
+    class Grid {
+        +Width : int
+        +Height : int
+        +GetCell(x : int, y : int) Cell
+        +CellToWorld(cell : Vector2Int) Vector3
+        +WorldToCell(pos : Vector3) Vector2Int
+    }
+
+    class FlowField {
+        <<純粋C#クラス>>
+        +Recalculate(grid : Grid)  ゴールからBFSで距離を計算
+        +NextCell(from : Vector2Int) Vector2Int
+        +CanReachGoal(from : Vector2Int) bool
+    }
+
+    class PlacementValidator {
+        +CanPlace(cell : Vector2Int) bool  出現マス・ゴールマス・道を塞ぐ配置は不可
+    }
+
+    class PlacementController {
+        <<マウス入力の窓口>>
+        +OnCellClicked(cell : Vector2Int)
+        +TryPlaceTower(data : TowerData, cell : Vector2Int)
+        +TryAttachGem(tower : Tower, gem : GemData)
+    }
+
+    %% ===== タワー =====
+    class TowerType {
+        <<enumeration>>
+        Wall
+        Bow
+        Normal
+        Cannon
+    }
+
+    class TowerData {
+        <<ScriptableObject>>
+        +type : TowerType
+        +attack : int
+        +attackInterval : float
+        +range : float
+        +splashRadius : float  0なら単体
+        +cost : int
+        +canAttachGem : bool  壁は false
+        +prefab : GameObject
+    }
+
+    class TowerStats {
+        <<struct>>
+        +attack : int
+        +attackInterval : float
+        +range : float
+        +splashRadius : float
+    }
+
+    class Tower {
+        +Data : TowerData
+        +Gem : GemData  付け替え不可
+        +AttachGem(gem : GemData) bool
+        +GetStats() TowerStats  基本性能＋宝石の補正
+    }
+
+    class Projectile {
+        +damage : int
+        +splashRadius : float
+        +Init(target : Enemy, damage : int, splash : float)
+    }
+
+    %% ===== 宝石 =====
+    class GemSize {
+        <<enumeration>>
+        Small
+        Medium
+        Large
+    }
+
+    class GemEffectType {
+        <<enumeration  例>>
+        AttackUp
+        RangeUp
+        IntervalDown
+    }
+
+    class GemData {
+        <<ScriptableObject>>
+        +gemName : string
+        +effectType : GemEffectType
+        +size : GemSize
+        +BonusValue : float  サイズに応じた効果量
+    }
+
+    class GemInventory {
+        <<ステージ内の宝石所持リスト>>
+        +Gems : IReadOnlyList~GemData~
+        +Add(gem : GemData)
+        +Take(gem : GemData) bool
+    }
+
+    %% ===== 敵 =====
+    class EnemyData {
+        <<ScriptableObject>>
+        +enemyName : string
+        +maxHp : int
+        +moveSpeed : float
+        +rewardMoney : int
+        +isBoss : bool
+        +dropGem : GemData  ボスのみ
+    }
+
+    class Enemy {
+        +Data : EnemyData
+        +Hp : int
+        +TakeDamage(dmg : int)
+        +event OnDefeated
+    }
+
+    %% ===== 最上段：画面（シーン）とシーン間の受け渡し =====
+    TitleController ..> SceneLoader : 画面遷移
+    StageSelectController ..> SceneLoader : 画面遷移
+    StageSelectController ..> GameSession : 選択内容を書き込む
+    StageSelectController --> "1..*" StageData : 選べるステージ
+    GameSession --> "0..1" StageData : 選んだステージ
+    GameSession --> "0..*" GemData : 持ち込む宝石
+
+    %% ===== 上段：ステージ全体の進行 =====
+    GameSession <.. GameManager : 開始時に読む
+    StageData <-- GameManager : 設定を使う
+    StageData *-- "多" WaveData
+    GameManager --> GameState
+    GameManager *-- Grid
+    GameManager *-- FlowField
+    GameManager *-- WaveSpawner
+    GameManager *-- GemInventory
+    GameManager ..> UIManager : 表示を更新
+    WaveData <-- WaveSpawner : 出現内容を読む
+    WaveSpawner ..> Enemy : 生成する
+
+    %% ===== 中段：マス目・経路・配置 =====
+    Grid *-- "多" Cell
+    Cell --> CellType
+    Cell --> "0..1" Tower : 置かれている
+    Grid <.. FlowField : 参照
+    Grid <-- PlacementController
+    GameManager <.. PlacementController : お金を使う
+    PlacementController --> PlacementValidator
+    PlacementController ..> Tower : 生成・宝石装着
+    PlacementValidator ..> FlowField : 到達できるか調べる
+
+    %% ===== 下段：タワー・宝石・敵・データ =====
+    Tower --> TowerData
+    TowerData --> TowerType
+    Tower --> "0..1" GemData : 装着
+    Tower ..> TowerStats : 計算して返す
+    Tower ..> Projectile : 発射
+    Projectile ..> Enemy : 命中
+    GemData --> GemSize
+    GemData --> GemEffectType
+    GemInventory o-- "多" GemData
+    WaveData --> EnemyData
+    Enemy --> EnemyData
+    FlowField <.. Enemy : 道なりに進む
+    GameManager <.. Enemy : 撃破・到達を通知
+    EnemyData --> "0..1" GemData : ボスのドロップ

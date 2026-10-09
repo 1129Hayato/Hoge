@@ -38,6 +38,8 @@ classDiagram
         +spawnCells : Vector2Int[]  敵の出現マス
         +goalCells : Vector2Int[]  到達で負けるマス
         +startMoney : int  初期お金
+        +startLife : int  ステージ・難易度で変える
+        +waveInterval : float  次のウェーブまでの待ち時間
         +waves : WaveData[]
     }
 
@@ -62,21 +64,28 @@ classDiagram
         <<ステージ全体の司令塔>>
         +State : GameState
         +Money : int
+        +Life : int
         +CurrentWave : int
         +StartStage()
         +AddMoney(v : int)
         +TrySpendMoney(v : int) bool
         +OnEnemyDefeated(enemy : Enemy)
-        +OnGoalReached()
+        +OnEnemyReachedGoal(lifeDamage : int)
+        +OnStageCleared()  手持ちの残りをインベントリへ移す
+        +OnStageFailed()  持ち込んだ宝石を失う
     }
 
     class WaveSpawner {
+        +TimeUntilNextWave : float
+        +CallNextWave()  早呼び（残り時間に応じたボーナス）
         +SpawnWave(wave : WaveData)
         +event OnWaveCleared
     }
 
     class UIManager {
         +ShowMoney(v : int)
+        +ShowLife(v : int)
+        +ShowSpeed(speed : float)
         +ShowWave(n : int)
         +ShowGemConfirm(gem : GemData, tower : Tower)
         +ShowResult(isWin : bool)
@@ -109,6 +118,7 @@ classDiagram
         <<純粋C#クラス>>
         +Recalculate(grid : Grid)  ゴールからBFSで距離を計算
         +NextCell(from : Vector2Int) Vector2Int
+        +GetDistance(cell : Vector2Int) int  ゴールまでの道のり
         +CanReachGoal(from : Vector2Int) bool
     }
 
@@ -121,6 +131,7 @@ classDiagram
         +OnCellClicked(cell : Vector2Int)
         +TryPlaceTower(data : TowerData, cell : Vector2Int)
         +TryAttachGem(tower : Tower, gem : GemData)
+        +TrySellTower(tower : Tower)  半額返金・宝石は失う
     }
 
     %% ===== タワー =====
@@ -156,7 +167,9 @@ classDiagram
         +Data : TowerData
         +Gem : GemData  付け替え不可
         +AttachGem(gem : GemData) bool
+        +SellPrice : int  建造コストの半額
         +GetStats() TowerStats  基本性能＋宝石の補正
+        +FindTarget() Enemy  ゴールに近い敵（指定があれば優先）
     }
 
     class Projectile {
@@ -195,6 +208,35 @@ classDiagram
         +Take(gem : GemData) bool
     }
 
+    class PlayerInventory {
+        <<ずっと持っている宝石（セーブ対象）>>
+        +Gems : List~GemData~
+        +Add(gem : GemData)
+        +Remove(gem : GemData)
+        +Contains(gem : GemData) bool
+    }
+
+    class SaveManager {
+        <<static>>
+        +Save(inventory : PlayerInventory)
+        +Load() PlayerInventory
+    }
+
+    class TimeController {
+        <<一時停止・早送り>>
+        +IsPaused : bool
+        +Speed : float  1.0 / 1.5 / 2.0
+        +SetPaused(paused : bool)
+        +SetSpeed(speed : float)
+    }
+
+    class TargetingController {
+        <<プレイヤーの敵指定（暫定）>>
+        +FocusEnemy : Enemy
+        +OnEnemyClicked(enemy : Enemy)
+        +Clear()
+    }
+
     %% ===== 敵 =====
     class EnemyData {
         <<ScriptableObject>>
@@ -202,6 +244,7 @@ classDiagram
         +maxHp : int
         +moveSpeed : float
         +rewardMoney : int
+        +lifeDamage : int  ゴール到達で減るライフ（案）
         +isBoss : bool
         +dropGem : GemData  ボスのみ
     }
@@ -209,6 +252,7 @@ classDiagram
     class Enemy {
         +Data : EnemyData
         +Hp : int
+        +DistanceToGoal() int  ゴールまでの道のり
         +TakeDamage(dmg : int)
         +event OnDefeated
     }
@@ -220,6 +264,9 @@ classDiagram
     StageSelectController --> "1..*" StageData : 選べるステージ
     GameSession --> "0..1" StageData : 選んだステージ
     GameSession --> "0..*" GemData : 持ち込む宝石
+    StageSelectController ..> PlayerInventory : 持ち込む宝石を選ぶ
+    SaveManager ..> PlayerInventory : 保存・読み込み
+    PlayerInventory --> "0..*" GemData : 所持
 
     %% ===== 上段：ステージ全体の進行 =====
     GameSession <.. GameManager : 開始時に読む
@@ -231,6 +278,9 @@ classDiagram
     GameManager *-- WaveSpawner
     GameManager *-- GemInventory
     GameManager ..> UIManager : 表示を更新
+    GameManager ..> PlayerInventory : クリア時に更新・敗北時に失う
+    GameManager *-- TimeController
+    GameManager *-- TargetingController
     WaveData <-- WaveSpawner : 出現内容を読む
     WaveSpawner ..> Enemy : 生成する
 
@@ -251,6 +301,8 @@ classDiagram
     Tower --> "0..1" GemData : 装着
     Tower ..> TowerStats : 計算して返す
     Tower ..> Projectile : 発射
+    TargetingController <.. Tower : 指定された敵を優先
+    TargetingController ..> Enemy : 指定する
     Projectile ..> Enemy : 命中
     GemData --> GemSize
     GemData --> GemEffectType
